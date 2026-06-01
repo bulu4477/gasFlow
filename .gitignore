@@ -1,0 +1,34 @@
+node_modules/
+.env
+.env.local
+.env.*.local
+
+# Foundry
+out/
+cache/
+broadcast/
+
+# Hardhat
+artifacts/
+cache_hardhat/
+typechain-types/
+
+# Build
+dist/
+build/
+
+# IDE
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Coverage
+coverage/
+lcov.info
+
+# Gas reports
+gas-reports/
