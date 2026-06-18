@@ -16,11 +16,19 @@ typechain-types/
 # Build
 dist/
 build/
+forge-cache/
+
+# Hardhat deployments (auto-generated)
+deployments/
 
 # IDE
 .idea/
+.vscode/
 *.swp
 *.swo
+
+# Sisyphus session state
+.sisyphus/run-continuation/
 
 # OS
 .DS_Store
