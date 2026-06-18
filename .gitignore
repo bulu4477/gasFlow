@@ -18,9 +18,6 @@ dist/
 build/
 forge-cache/
 
-# Hardhat deployments (auto-generated)
-deployments/
-
 # IDE
 .idea/
 .vscode/
