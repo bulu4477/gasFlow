@@ -72,21 +72,13 @@ interface IERC20Permit {
  *      EIP-2612 permit allowance → processCompensation (Config does transferFrom + compensate)
  */
 contract GasFlowDelegator is ReentrancyGuardTransient {
+    struct Call {
+        address to;
+        uint256 value;
+        bytes data;
+    }
 
-    // ──────────────────────────────────────
-    //  Private Variables
-    // ──────────────────────────────────────
-
-    // (none)
-
-    // ──────────────────────────────────────
-    //  Public Variables
-    // ──────────────────────────────────────
-
-    /// @dev Immutable reference to shared config. Baked into bytecode — same for all EOAs.
     IGasFlowConfig public immutable config;
-
-    /// @notice Per-user nonce for replay protection. Lives in the EOA's own storage.
     uint256 public nonce;
 
     /// @dev Fixed gas overhead for execute() wrapper.
@@ -94,20 +86,6 @@ contract GasFlowDelegator is ReentrancyGuardTransient {
     ///      transferFrom (~51k), oracle (~2.1k), Config+StakePool (~45k), events (~3k).
     ///      Must be calibrated on testnet; 160k is a conservative baseline.
     uint256 public constant FIXED_GAS_OVERHEAD = 160000;
-
-    // ──────────────────────────────────────
-    //  Data Structures
-    // ──────────────────────────────────────
-
-    struct Call {
-        address to;
-        uint256 value;
-        bytes data;
-    }
-
-    // ──────────────────────────────────────
-    //  Events
-    // ──────────────────────────────────────
 
     event CallExecuted(address indexed to, uint256 value);
     event BatchExecuted(
@@ -123,120 +101,13 @@ contract GasFlowDelegator is ReentrancyGuardTransient {
         uint256 ethCompensation
     );
 
-    // ──────────────────────────────────────
-    //  Constructor
-    // ──────────────────────────────────────
-
+    /*    ------------ Constructor ------------    */
     constructor(address _config) {
         require(_config != address(0), "Delegator: zero config");
         config = IGasFlowConfig(_config);
     }
 
-    // ──────────────────────────────────────
-    //  View Functions
-    // ──────────────────────────────────────
-
-    // (config, nonce are auto-generated getters)
-
-    // ──────────────────────────────────────
-    //  Public Write Functions
-    // ──────────────────────────────────────
-
-    /**
-     * @notice Execute a batch of calls with gas sponsorship.
-     * @param calls             The sequence of contract calls the user wants to make.
-     * @param signature         ECDSA signature over (chainId, nonce, calls) signed by user's EOA.
-     * @param feeToken          The stablecoin token the user pays fees in (e.g., USDC).
-     * @param maxPermitAmount   EIP-2612 maximum amount the user authorizes.
-     * @param deadline          EIP-2612 deadline for the permit.
-     * @param v,r,s             EIP-2612 permit signature components.
-     */
-    function execute(
-        Call[] calldata calls,
-        bytes calldata signature,
-        address feeToken,
-        uint256 maxPermitAmount,
-        uint256 deadline,
-        uint8 v,
-        bytes32 r,
-        bytes32 s
-    ) external payable nonReentrant {
-        address stakePool = config.stakePool();
-        require(stakePool != address(0), "Delegator: stake pool not set");
-        (address ethUsdFeed, address tokenUsdFeed) = config.priceFeeds(feeToken);
-        require(ethUsdFeed != address(0), "Delegator: unsupported fee token");
-
-        // ── Step 1: Verify ECDSA signature ──
-        _verifySignature(calls, signature);
-
-        // ── Step 2: Execute batch with gas metering ──
-        uint256 gasStart = gasleft();
-        uint256 currentNonce = nonce;
-        nonce++;
-        _executeBatch(calls);
-        uint256 gasUsed = gasStart - gasleft() + FIXED_GAS_OVERHEAD;
-
-        // ── Step 3: Calculate compensation (L2 surcharge included) ──
-        uint256 baseEthCompensation = gasUsed * tx.gasprice;
-        uint256 l1Fee = (baseEthCompensation * config.l1FeeBps()) / 10000;
-        uint256 ethCompensation = baseEthCompensation + l1Fee;
-
-        // ── Step 4: Convert to stablecoin via Chainlink (two feeds) ──
-        uint256 baseFee = _ethToStable(ethCompensation, feeToken, ethUsdFeed, tokenUsdFeed);
-        uint256 feeAmount = (baseFee * config.minFeeRateBps()) / 10000;
-        require(feeAmount <= maxPermitAmount, "Delegator: fee exceeds max permit");
-        require(feeAmount > 0, "Delegator: fee too small");
-
-        emit FeeCollected(feeToken, feeAmount, ethCompensation);
-
-        // ── Step 5: EIP-2612 permit (set allowance only, Config does transferFrom) ──
-        IERC20Permit(feeToken).permit(
-            address(this),       // owner = user's EOA
-            address(config),       // spender = user's EOA (Delegator IS the EOA)
-            maxPermitAmount,
-            deadline,
-            v, r, s
-        );
-
-        // ── Step 6: Process compensation via Config (transferFrom + compensateRelayer) ──
-        config.processCompensation(
-            address(this),       // feePayer = user's EOA
-            msg.sender,          // relayer
-            ethCompensation,
-            feeToken,
-            feeAmount
-        );
-
-        emit BatchExecuted(currentNonce, msg.sender, gasUsed, ethCompensation, l1Fee);
-    }
-
-    // ──────────────────────────────────────
-    //  Fallback
-    // ──────────────────────────────────────
-
-    fallback() external payable {}
-    receive() external payable {}
-
-    // ──────────────────────────────────────
-    //  Private Write Functions
-    // ──────────────────────────────────────
-
-    function _executeBatch(Call[] calldata calls) internal {
-        for (uint256 i = 0; i < calls.length; i++) {
-            _executeCall(calls[i]);
-        }
-    }
-
-    function _executeCall(Call calldata callItem) internal {
-        (bool success, ) = callItem.to.call{value: callItem.value}(callItem.data);
-        require(success, "Delegator: call reverted");
-        emit CallExecuted(callItem.to, callItem.value);
-    }
-
-    // ──────────────────────────────────────
-    //  Private View Functions
-    // ──────────────────────────────────────
-
+    /*    ---------- Read Functions -----------    */
     /**
      * @dev Verifies ECDSA signature over (chainId, nonce, calls).
      *      Uses abi.encode to prevent collision attacks.
@@ -305,4 +176,88 @@ contract GasFlowDelegator is ReentrancyGuardTransient {
 
         return feeAmount;
     }
+
+    /*    ---------- Write Functions -----------    */
+    /**
+     * @notice Execute a batch of calls with gas sponsorship.
+     * @param calls             The sequence of contract calls the user wants to make.
+     * @param signature         ECDSA signature over (chainId, nonce, calls) signed by user's EOA.
+     * @param feeToken          The stablecoin token the user pays fees in (e.g., USDC).
+     * @param maxPermitAmount   EIP-2612 maximum amount the user authorizes.
+     * @param deadline          EIP-2612 deadline for the permit.
+     * @param v,r,s             EIP-2612 permit signature components.
+     */
+    function execute(
+        Call[] calldata calls,
+        bytes calldata signature,
+        address feeToken,
+        uint256 maxPermitAmount,
+        uint256 deadline,
+        uint8 v,
+        bytes32 r,
+        bytes32 s
+    ) external payable nonReentrant {
+        address stakePool = config.stakePool();
+        require(stakePool != address(0), "Delegator: stake pool not set");
+        (address ethUsdFeed, address tokenUsdFeed) = config.priceFeeds(feeToken);
+        require(ethUsdFeed != address(0), "Delegator: unsupported fee token");
+
+        // ── Step 1: Verify ECDSA signature ──
+        _verifySignature(calls, signature);
+
+        // ── Step 2: Execute batch with gas metering ──
+        uint256 gasStart = gasleft();
+        uint256 currentNonce = nonce;
+        nonce++;
+        _executeBatch(calls);
+        uint256 gasUsed = gasStart - gasleft() + FIXED_GAS_OVERHEAD;
+
+        // ── Step 3: Calculate compensation (L2 surcharge included) ──
+        uint256 baseEthCompensation = gasUsed * tx.gasprice;
+        uint256 l1Fee = (baseEthCompensation * config.l1FeeBps()) / 10000;
+        uint256 ethCompensation = baseEthCompensation + l1Fee;
+
+        // ── Step 4: Convert to stablecoin via Chainlink (two feeds) ──
+        uint256 baseFee = _ethToStable(ethCompensation, feeToken, ethUsdFeed, tokenUsdFeed);
+        uint256 feeAmount = (baseFee * config.minFeeRateBps()) / 10000;
+        require(feeAmount <= maxPermitAmount, "Delegator: fee exceeds max permit");
+        require(feeAmount > 0, "Delegator: fee too small");
+
+        emit FeeCollected(feeToken, feeAmount, ethCompensation);
+
+        // ── Step 5: EIP-2612 permit (set allowance only, Config does transferFrom) ──
+        IERC20Permit(feeToken).permit(
+            address(this),       // owner = user's EOA
+            address(config),       // spender = user's EOA (Delegator IS the EOA)
+            maxPermitAmount,
+            deadline,
+            v, r, s
+        );
+
+        // ── Step 6: Process compensation via Config (transferFrom + compensateRelayer) ──
+        config.processCompensation(
+            address(this),       // feePayer = user's EOA
+            msg.sender,          // relayer
+            ethCompensation,
+            feeToken,
+            feeAmount
+        );
+
+        emit BatchExecuted(currentNonce, msg.sender, gasUsed, ethCompensation, l1Fee);
+    }
+
+    function _executeBatch(Call[] calldata calls) internal {
+        for (uint256 i = 0; i < calls.length; i++) {
+            _executeCall(calls[i]);
+        }
+    }
+
+    function _executeCall(Call calldata callItem) internal {
+        (bool success, ) = callItem.to.call{value: callItem.value}(callItem.data);
+        require(success, "Delegator: call reverted");
+        emit CallExecuted(callItem.to, callItem.value);
+    }
+
+    fallback() external payable {}
+    receive() external payable {}
 }

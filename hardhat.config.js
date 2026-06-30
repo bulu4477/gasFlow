@@ -4,7 +4,8 @@ require("dotenv").config()
 require("hardhat-deploy")
 require("hardhat-deploy-ethers")
 require( "./tasks" )
-require("@nomicfoundation/hardhat-foundry");
+require( "@nomicfoundation/hardhat-foundry" );
+const { upgrades } = require('@openzeppelin/hardhat-upgrades');
 
 /** @type import('hardhat/config').HardhatUserConfig */
 const { projectId, PRIVATE_KEY } = process.env

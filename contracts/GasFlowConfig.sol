@@ -86,8 +86,10 @@ contract GasFlowConfig is Ownable2Step, Pausable {
     error StalePrice();
     error FeeBelowOracleRate(uint256 expected, uint256 provided);
 
+    /*    ------------ Constructor ------------    */
     constructor(address _owner) Ownable(_owner) {}
 
+    /*    ---------- Read Functions -----------    */
     /// @notice Returns (ethUsdFeed, tokenUsdFeed) for a given fee token.
     ///         Used by GasFlowDelegator for client-side fee estimation.
     function priceFeeds(address token) external view returns (address, address) {
@@ -142,10 +144,7 @@ contract GasFlowConfig is Ownable2Step, Pausable {
         if (feeAmount < minFee) revert FeeBelowOracleRate(minFee, feeAmount);
     }
 
-    // ──────────────────────────────────────
-    //  Admin: Pause
-    // ──────────────────────────────────────
-
+    /*    ---------- Write Functions -----------    */
     function pause() external onlyOwner {
         _pause();
     }
@@ -197,10 +196,6 @@ contract GasFlowConfig is Ownable2Step, Pausable {
 
         emit CompensationProcessed(relayer, ethAmount, feeToken, feeAmount);
     }
-
-    // ──────────────────────────────────────
-    //  Admin: Configuration Setters
-    // ──────────────────────────────────────
 
     function setStakePool(address _stakePool) external onlyOwner {
         require(_stakePool != address(0), "GasFlowConfig: zero stake pool");

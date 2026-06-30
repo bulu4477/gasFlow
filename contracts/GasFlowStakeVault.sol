@@ -60,6 +60,7 @@ contract GasFlowStakeVault is Initializable, UUPSUpgradeable, ERC4626Upgradeable
 
     error TokenNotIncrease();
 
+    /*    ------------ Constructor ------------    */
     constructor() {
         _disableInitializers();
     }
@@ -82,11 +83,13 @@ contract GasFlowStakeVault is Initializable, UUPSUpgradeable, ERC4626Upgradeable
         onlyOwner
     {}
 
+    /*    ------------- Modifiers ------------    */
     modifier onlyConfig() {
         require(msg.sender == config, "GasFlowStake: caller is not config");
         _;
     }
 
+    /*    ---------- Read Functions -----------    */
     /// @notice Returns the total WETH assets held by the vault.
     ///         Uses actual WETH balance — consistent with all deposit/withdrawal paths.
     function totalAssets() public view override returns (uint256) {
@@ -97,6 +100,7 @@ contract GasFlowStakeVault is Initializable, UUPSUpgradeable, ERC4626Upgradeable
         return 18;
     }
 
+    /*    ---------- Write Functions -----------    */
     /// @notice Deposit ETH or WETH into the vault and receive gfETH shares.
     function depositETH(uint256 amount) public payable nonReentrant returns (uint256) {
         require(withdrawDelay > 0, "ERC4626_MODE_OFF");

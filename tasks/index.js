@@ -1,3 +1,5 @@
 const { task } = require( "hardhat/config" )
 
-task( "counter", require( "./counter" ) )
+task( "setPriceFeed", require( "./setPriceFeed" ) )
+
+task( "addRelayer", require( "./addRelayer" ) )
